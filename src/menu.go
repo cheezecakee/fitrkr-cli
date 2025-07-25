@@ -84,11 +84,11 @@ func updateMenu(m model, msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.menuChoice == len(menuOptions)-1 {
 				return m, tea.Quit
 			} else {
-				// List files in ./data/
+				// List files in ./src/internal/data/
 				files, err := listDataFiles()
 				if err != nil {
 					m.state = stateResult
-					m.resultMsg = fmt.Sprintf("Error reading ./data/: %v\nPress enter or q to return to menu.", err)
+					m.resultMsg = fmt.Sprintf("Error reading ./src/internal/data/: %v\nPress enter or q to return to menu.", err)
 					return m, nil
 				}
 				m.state = stateFileSelector
@@ -120,7 +120,7 @@ func updateFileMenu(m model, msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateMenu
 				return m, nil
 			}
-			m.selectedFile = filepath.Join("./data/", m.fileList[m.fileChoice])
+			m.selectedFile = filepath.Join("./src/internal/data/", m.fileList[m.fileChoice])
 			// Detect file type
 			ext := strings.ToLower(filepath.Ext(m.selectedFile))
 			var names []string
@@ -225,7 +225,7 @@ func (m model) View() string {
 
 // listDataFiles returns a sorted list of .csv, .json, .yaml, .yml files in ./data/
 func listDataFiles() ([]string, error) {
-	entries, err := os.ReadDir("./data/")
+	entries, err := os.ReadDir("./src/internal/data/")
 	if err != nil {
 		return nil, err
 	}
