@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	InsertMuscleGroupQuery  = "INSERT INTO muscle_groups (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
-	InsertExerciseTypeQuery = "INSERT INTO exercise_types (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
-	InsertCategoryQuery     = "INSERT INTO exercise_categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
+	InsertMuscleGroupQuery  = "INSERT INTO muscle_group (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
+	InsertTrainingTypeQuery = "INSERT INTO training_type (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
+	InsertCategoryQuery     = "INSERT INTO exercise_category (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
 	InsertEquipmentQuery    = "INSERT INTO equipment (name) VALUES ($1) ON CONFLICT (name) DO NOTHING"
 )
 

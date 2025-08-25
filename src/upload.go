@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// parseCSV parses a CSV file and returns a slice of names (first column, skipping header if present)
+// ParseCSV parses a CSV file and returns a slice of names (first column, skipping header if present)
 func ParseCSV(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -39,7 +39,7 @@ func ParseCSV(path string) ([]string, error) {
 	return names, nil
 }
 
-// parseJSON expects a JSON array of objects with a "name" field
+// ParseJSON expects a JSON array of objects with a "name" field
 func ParseJSON(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -58,7 +58,7 @@ func ParseJSON(path string) ([]string, error) {
 	return names, nil
 }
 
-// parseYAML expects a YAML list of objects with a "name" field
+// ParseYAML expects a YAML list of objects with a "name" field
 func ParseYAML(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -86,7 +86,7 @@ type ExerciseUploadRow struct {
 	Name        string
 	Description string
 	Category    string
-	Equipment   string
+	Equipment   []string
 	Types       []string // split by ;
 	Muscles     []string // split by ;
 }
@@ -106,6 +106,7 @@ func ParseExercisesCSV(path string) ([]ExerciseUploadRow, error) {
 	if len(records) < 1 {
 		return nil, errors.New("no records found")
 	}
+
 	// Header: Name,Description,Category,Equipment,Types,Muscles
 	var rows []ExerciseUploadRow
 	for i, rec := range records {
@@ -119,7 +120,7 @@ func ParseExercisesCSV(path string) ([]ExerciseUploadRow, error) {
 			Name:        strings.TrimSpace(rec[0]),
 			Description: strings.TrimSpace(rec[1]),
 			Category:    strings.TrimSpace(rec[2]),
-			Equipment:   strings.TrimSpace(rec[3]),
+			Equipment:   SplitAndTrim(rec[3], ";"), // now as []string
 			Types:       SplitAndTrim(rec[4], ";"),
 			Muscles:     SplitAndTrim(rec[5], ";"),
 		}
@@ -128,6 +129,7 @@ func ParseExercisesCSV(path string) ([]ExerciseUploadRow, error) {
 	return rows, nil
 }
 
+// SplitAndTrim splits a string by sep, trims spaces and quotes
 func SplitAndTrim(s, sep string) []string {
 	parts := strings.Split(s, sep)
 	var out []string
@@ -154,42 +156,71 @@ func InsertExercises(db *sql.DB, rows []ExerciseUploadRow) error {
 	}()
 
 	for _, row := range rows {
+		// Category
 		catID, err := GetOrInsertCategory(tx, row.Category)
 		if err != nil {
 			return fmt.Errorf("category %s: %w", row.Category, err)
 		}
-		equipID, err := GetOrInsertEquipment(tx, row.Equipment)
-		if err != nil {
-			return fmt.Errorf("equipment %s: %w", row.Equipment, err)
-		}
-		// Insert exercise
+
+		// Insert exercise (no equipment_id)
 		var exID int
 		err = tx.QueryRow(
-			`INSERT INTO exercises (name, description, category_id, equipment_id) VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (name) DO UPDATE SET description=EXCLUDED.description RETURNING id`,
-			row.Name, row.Description, catID, equipID,
+			`INSERT INTO exercise (name, description, category_id) 
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (name) DO UPDATE SET description=EXCLUDED.description 
+			 RETURNING id`,
+			row.Name, row.Description, catID,
 		).Scan(&exID)
 		if err != nil {
 			return fmt.Errorf("insert exercise %s: %w", row.Name, err)
 		}
-		// Types
+
+		for _, e := range row.Equipment {
+			e = strings.TrimSpace(e)
+			if e == "" || strings.EqualFold(e, "None") {
+				continue
+			}
+			equipID, err := GetOrInsertEquipment(tx, e)
+			if err != nil {
+				return fmt.Errorf("equipment %s: %w", e, err)
+			}
+			_, err = tx.Exec(
+				`INSERT INTO exercise_equipment (exercise_id, equipment_id) 
+		 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				exID, equipID,
+			)
+			if err != nil {
+				return fmt.Errorf("insert equipment junction: %w", err)
+			}
+		}
+
+		// Types (training_type)
 		for _, t := range row.Types {
 			typeID, err := GetOrInsertType(tx, t)
 			if err != nil {
 				return fmt.Errorf("type %s: %w", t, err)
 			}
-			_, err = tx.Exec(`INSERT INTO exercise_types_junction (exercise_id, type_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, exID, typeID)
+			_, err = tx.Exec(
+				`INSERT INTO exercise_training_types (exercise_id, training_type_id) 
+				 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				exID, typeID,
+			)
 			if err != nil {
 				return fmt.Errorf("insert type junction: %w", err)
 			}
 		}
+
 		// Muscles
 		for _, m := range row.Muscles {
 			muscleID, err := GetOrInsertMuscle(tx, m)
 			if err != nil {
 				return fmt.Errorf("muscle %s: %w", m, err)
 			}
-			_, err = tx.Exec(`INSERT INTO exercise_muscles (exercise_id, muscle_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, exID, muscleID)
+			_, err = tx.Exec(
+				`INSERT INTO exercise_muscles (exercise_id, muscle_group_id) 
+				 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				exID, muscleID,
+			)
 			if err != nil {
 				return fmt.Errorf("insert muscle junction: %w", err)
 			}
@@ -200,7 +231,7 @@ func InsertExercises(db *sql.DB, rows []ExerciseUploadRow) error {
 
 func GetOrInsertCategory(tx *sql.Tx, name string) (int, error) {
 	var id int
-	err := tx.QueryRow(`INSERT INTO exercise_categories (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
+	err := tx.QueryRow(`INSERT INTO exercise_category (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
 	return id, err
 }
 
@@ -212,13 +243,13 @@ func GetOrInsertEquipment(tx *sql.Tx, name string) (int, error) {
 
 func GetOrInsertType(tx *sql.Tx, name string) (int, error) {
 	var id int
-	err := tx.QueryRow(`INSERT INTO exercise_types (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
+	err := tx.QueryRow(`INSERT INTO training_type (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
 	return id, err
 }
 
 func GetOrInsertMuscle(tx *sql.Tx, name string) (int, error) {
 	var id int
-	err := tx.QueryRow(`INSERT INTO muscle_groups (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
+	err := tx.QueryRow(`INSERT INTO muscle_group (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, name).Scan(&id)
 	return id, err
 }
 
